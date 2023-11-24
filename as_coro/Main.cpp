@@ -182,10 +182,10 @@ void Main()
 
 	// コルーチンたち
 	using Coro = ScriptCoroutine<CatState>;
-	Array<std::shared_ptr<Coro>> coroList{ Arg::reserve = 128 };
+	Array<std::shared_ptr<Coro>> coroList{ Arg::reserve = 256 };
 
 	// コルーチン作成用タイマー
-	Timer timerMakeCoro{ 0.3s, StartImmediately::Yes };
+	Timer timerMakeCoro{ 0.2s, StartImmediately::Yes };
 
 	// ねこ
 	const auto cat = Texture{ U"🐱"_emoji };
@@ -196,14 +196,18 @@ void Main()
 		{
 			timerMakeCoro.restart();
 
-			coroList.emplace_back(std::make_shared<Coro>(script.getCoroutine<CatState>(U"UpdateCat", CatState{ RandomVec2(Scene::Rect().bottom().movedBy(0, 80)), Stopwatch{ StartImmediately::Yes } })));
+			for (auto i : step(Random(2, 5)))
+			{
+				coroList.emplace_back(std::make_shared<Coro>(script.getCoroutine<CatState>(U"UpdateCat", CatState{ RandomVec2(Scene::Rect().bottom().movedBy(0, 80)), Stopwatch{ StartImmediately::Yes } })));
+			}
 		}
 
 		for (auto& coro : coroList)
 		{
 			(*coro)();
 
-			cat.rotated(10_deg * Periodic::Sine1_1(2.2s, coro->getState().time.sF())).drawAt(coro->getState().pos);
+			cat.scaled(0.75).rotated(10_deg * Periodic::Sine1_1(2.2s, coro->getState().time.sF())).drawAt(coro->getState().pos, ColorF{ 0, 0.5 });
+			cat.scaled(0.7).rotated(10_deg * Periodic::Sine1_1(2.2s, coro->getState().time.sF())).drawAt(coro->getState().pos);
 		}
 
 		coroList.remove_if([](const auto& coro) { return not coro->getState().pos.intersects(Scene::Rect().stretched(100)); });
