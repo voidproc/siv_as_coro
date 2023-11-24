@@ -21,12 +21,29 @@ namespace s3d
 			ctx_->SetArgAddress(0, &state_);
 		}
 
+		ScriptCoroutine(const ScriptCoroutine&) = delete;
+
+		ScriptCoroutine(ScriptCoroutine&& sc)
+			: ScriptCoroutine{ sc.ctx_, sc.state_ }
+		{
+			sc.ctx_ = nullptr;
+		}
+
 		~ScriptCoroutine()
 		{
 			if (ctx_ != nullptr)
 			{
 				ctx_->Release();
 			}
+		}
+
+		ScriptCoroutine& operator =(const ScriptCoroutine&) = delete;
+
+		ScriptCoroutine& operator =(ScriptCoroutine&& sc)
+		{
+			ctx_ = sc.ctx_;
+			sc.ctx_ = nullptr;
+			state_ = sc.state_;
 		}
 
 		/// @brief コルーチンが有効なら実行する
@@ -56,6 +73,11 @@ namespace s3d
 		}
 
 		State& getState()
+		{
+			return state_;
+		}
+
+		const State& getState() const
 		{
 			return state_;
 		}
@@ -113,7 +135,13 @@ namespace s3d
 	};
 }
 
-namespace ScriptFunctions
+struct CatState
+{
+	Vec2 pos{};
+	Stopwatch time{};
+};
+
+namespace Scripting
 {
 	using namespace AngelScript;
 
@@ -133,41 +161,53 @@ namespace ScriptFunctions
 		{
 			engine->RegisterGlobalFunction("void Yield()", asFUNCTION(Yield), asCALL_CDECL);
 		}
+
+		static void RegisterObjects(asIScriptEngine* engine)
+		{
+			engine->RegisterObjectType("CatState", sizeof(CatState), asOBJ_VALUE | asOBJ_POD);
+			engine->RegisterObjectProperty("CatState", "Vec2 pos", 0);
+			engine->RegisterObjectProperty("CatState", "Stopwatch time", 16);
+		}
 	}
 }
 
 void Main()
 {
-	Scene::SetBackground(Color{ 16 });
+	Scene::SetBackground(Palette::Chocolate.lerp(Palette::Black, 0.5));
 
-	ScriptFunctions::Binding::RegisterFunctions(Script::GetEngine());
+	Scripting::Binding::RegisterFunctions(Script::GetEngine());
+	Scripting::Binding::RegisterObjects(Script::GetEngine());
 
 	const CustomScript script{ U"coro.as" };
 
-	// 通常の関数を呼んでみる
-	//auto func = script.getFunction<int()>(U"Func1");
-	//int funcRet = func();
-	//Print << funcRet;
+	// コルーチンたち
+	using Coro = ScriptCoroutine<CatState>;
+	Array<std::shared_ptr<Coro>> coroList{ Arg::reserve = 128 };
 
-	// コルーチンを作成
-	auto coro = script.getCoroutine<Vec2>(U"Coro1", Vec2{ 400, 200 });
+	// コルーチン作成用タイマー
+	Timer timerMakeCoro{ 0.3s, StartImmediately::Yes };
 
 	// ねこ
-	const auto cat = Texture{ U"🐈"_emoji };
+	const auto cat = Texture{ U"🐱"_emoji };
 
 	while (System::Update())
 	{
-		if (SimpleGUI::ButtonAt(U"コルーチンを実行"_sv, Scene::CenterF()))
+		if (timerMakeCoro.reachedZero())
 		{
-			Print << U"▼";
+			timerMakeCoro.restart();
 
-			// コルーチンを呼ぶ
-			coro();
-
-			// コルーチンの状態
-			Print << coro.getState();
+			coroList.emplace_back(std::make_shared<Coro>(script.getCoroutine<CatState>(U"UpdateCat", CatState{ RandomVec2(Scene::Rect().bottom().movedBy(0, 80)), Stopwatch{ StartImmediately::Yes } })));
 		}
 
-		cat.rotated(10_deg * Periodic::Sine1_1(2.4)).drawAt(coro.getState());
+		for (auto& coro : coroList)
+		{
+			(*coro)();
+
+			cat.rotated(10_deg * Periodic::Sine1_1(2.2s, coro->getState().time.sF())).drawAt(coro->getState().pos);
+		}
+
+		coroList.remove_if([](const auto& coro) { return not coro->getState().pos.intersects(Scene::Rect().stretched(100)); });
+
+		PutText(Format(coroList.size()), Arg::topLeft = Vec2{ 16, 16 });
 	}
 }
